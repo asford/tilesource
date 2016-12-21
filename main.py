@@ -13,7 +13,7 @@ import requests
 import requests_toolbelt.adapters.appengine
 requests_toolbelt.adapters.appengine.monkeypatch()
 
-from tilesource import clip_image_alpha, overlay_image, sources, source_images
+from tilesource import clip_image_alpha, overlay_image, source_images, parse_tilespec
 
 class DirectRender(webapp2.RequestHandler):
 
@@ -25,16 +25,22 @@ class DirectRender(webapp2.RequestHandler):
         self.response.headers['Content-Type'] = r.headers["Content-Type"]
         self.response.write(r.content)
 
-class CompositeRender(webapp2.RequestHandler):
+class CompositeTile(webapp2.RequestHandler):
 
-    def get(self, z, x, y):
+    def get(self, tilespec):
+        params = {
+            p : self.request.get(p)
+            for p in ("z", "x", "y")
+        }
 
-        tile_images = source_images(z=z, x=x, y=y)
+        tilespec = parse_tilespec(tilespec)
+
+        tile_images = source_images(keys = [l for l, a in tilespec], **params)
             
-        composite = overlay_image(
-            tile_images["mb"],
-            clip_image_alpha(tile_images["fs"], 64)
-        )
+        composite = overlay_image(*[
+            clip_image_alpha(tile_images[layer], alpha)
+            for layer, alpha in tilespec
+        ])
 
         b = io.BytesIO()
         composite.save(b, format='png')
@@ -42,14 +48,16 @@ class CompositeRender(webapp2.RequestHandler):
         self.response.headers["Content-Type"] = "image/png"
         self.response.write(b.getvalue())
 
-class CompositeIndexRender(webapp2.RequestHandler):
-    def get(self):
-        template_values = {}
+class CompositeIndex(webapp2.RequestHandler):
+    def get(self, tilespec):
+        # Parse to assert that tilespec valid
+        parse_tilespec(tilespec)
+        template_values = dict(tilespec = tilespec)
         template = JINJA_ENVIRONMENT.get_template('composite/index.html')
         self.response.write(template.render(template_values))
 
 app = webapp2.WSGIApplication([
     webapp2.Route(r'/direct/<tiletype:\w+>/<z:\d+>/<x:\d+>/<y:\d+>.png', handler=DirectRender),
-    webapp2.Route(r'/composite/<z:\d+>/<x:\d+>/<y:\d+>.png', handler=CompositeRender),
-    webapp2.Route(r'/composite/', handler=CompositeIndexRender),
+    webapp2.Route(r'/composite/<tilespec:[^/]+>/tile', handler=CompositeTile),
+    webapp2.Route(r'/composite/<tilespec:[^/]+>/', handler=CompositeIndex),
 ], debug=True)

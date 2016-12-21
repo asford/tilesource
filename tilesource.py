@@ -8,11 +8,14 @@ import requests
 sources = {
     "fs" : "http://caltopo.com/resource/imagery/tiles/sf/{z}/{x}/{y}.png",
     "mb" : "http://caltopo.com/resource/imagery/mapbuilder/cs-60-40-c21BB6100-h22-a21-r22-t22d-m21-p21/{z}/{x}/{y}.png",
-    "ct" : "http://ctcontour.s3.amazonaws.com/feet/{z}/{x}/{y}.png",
+    "ct" : "http://caltopo.com/resource/imagery/tiles/c/{z}/{x}/{y}.png",
     "im" : "http://khm1.googleapis.com/kh?v=709&hl=en-US&&x={x}&y={y}&z={z}"
 }
 
-def source_images(z, x, y):
+def source_images(z, x, y, keys=None):
+    if not keys:
+        keys = sources.keys()
+
     tile_images = {}
     for s, u in sources.items():
         r = requests.get(u.format(z=z, x=x, y=y))
@@ -21,6 +24,22 @@ def source_images(z, x, y):
         tile_images[s] = Image.open(BytesIO(r.content))
     return tile_images
 
+def parse_tilespec(tilespec):
+    res = []
+    layers = tilespec.split()
+    for lspec in tilespec.split("_"):
+        lspec = lspec.split("-")
+        if len(lspec) == 1:
+            layer, alpha = lspec[0], 256
+        else:
+            assert len(lspec) == 2
+            layer, alpha = lspec[0], int(lspec[1])
+        
+        assert layer in sources
+        assert alpha >=0 and alpha<=256
+            
+        res.append((layer, alpha))
+    return res
 
 def clip_image_alpha(image, max_alpha):
     image = image.convert("RGBA")

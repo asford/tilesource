@@ -18,7 +18,7 @@
 
 	var mymap = L.map('mapid').setView([47.45970, -121.46560], 13);
 
-	L.tileLayer('/composite/{z}/{x}/{y}.png', {
+  L.tileLayer('/composite/{{ tilespec }}/tile?z={z}&x={x}&y={y}', {
 		maxZoom: 17,
 	}).addTo(mymap);
 </script>
