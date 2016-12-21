@@ -29,6 +29,9 @@
 	var mymap = L.map('map').setView([47.45970, -121.46560], 13);
 
   L.tileLayer('/composite/{{ tilespec }}/tile?z={z}&x={x}&y={y}', {
+    attribution: 'Map data &copy; <a href="http://caltopo.com">Caltopo</a> | <a href="/composite/{{ tilespec }}/tilejson" download="tilesource({{ tilespec }}).json">tilejson</a>',
+    
+		minZoom: 7,
 		maxZoom: 17,
 	}).addTo(mymap);
 </script>

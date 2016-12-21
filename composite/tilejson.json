@@ -1,0 +1,14 @@
+{
+    "tilejson": "2.1.0",
+    "name": "{{ tilespec }}",
+    "scheme": "xyz",
+
+    "tiles": [
+        "http://tilesource-153122.appspot.com//composite/{{ tilespec }}/tile?z={z}&x={x}&y={y}"
+    ],
+
+    "minzoom": 7,
+    "maxzoom": 17,
+
+    "bounds": [ -180, -85.05112877980659, 180, 85.0511287798066 ]
+}

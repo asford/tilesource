@@ -56,8 +56,19 @@ class CompositeIndex(webapp2.RequestHandler):
         template = JINJA_ENVIRONMENT.get_template('composite/index.html')
         self.response.write(template.render(template_values))
 
+class CompositeTilejson(webapp2.RequestHandler):
+    def get(self, tilespec):
+        # Parse to assert that tilespec valid
+        parse_tilespec(tilespec)
+        template_values = dict(tilespec = tilespec)
+        template = JINJA_ENVIRONMENT.get_template('composite/tilejson.json')
+        self.response.headers["Content-Type"] = "application/json"
+        self.response.write(template.render(template_values))
+
 app = webapp2.WSGIApplication([
     webapp2.Route(r'/direct/<tiletype:\w+>/<z:\d+>/<x:\d+>/<y:\d+>.png', handler=DirectRender),
     webapp2.Route(r'/composite/<tilespec:[^/]+>/tile', handler=CompositeTile),
+    webapp2.Route(r'/composite/<tilespec:[^/]+>/tilejson', handler=CompositeTilejson),
     webapp2.Route(r'/composite/<tilespec:[^/]+>/', handler=CompositeIndex),
+    webapp2.Route(r'/composite/<tilespec:[^/]+>', handler=CompositeIndex),
 ], debug=True)
