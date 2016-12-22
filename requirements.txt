@@ -1,5 +1,2 @@
-requests
-requests_toolbelt
 decorator
 Flask
-werkzeug_debugger_appengine
