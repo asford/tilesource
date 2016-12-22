@@ -1,5 +1,5 @@
 requests
 requests_toolbelt
-pillow
-
-Flask==0.10
+decorator
+Flask
+werkzeug_debugger_appengine
