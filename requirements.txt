@@ -1,2 +1,5 @@
 requests
 requests_toolbelt
+pillow
+
+Flask==0.10
