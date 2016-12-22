@@ -1,0 +1,33 @@
+Metadata-Version: 2.0
+Name: Flask-CacheControl
+Version: 0.1.2
+Summary: Set Cache-Control headers on the Flask response
+Home-page: https://github.com/twiebe/Flask-CacheControl
+Author: Thomas Wiebe
+Author-email: code@heimblick.net
+License: BSD
+Platform: any
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: BSD License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python
+Classifier: Topic :: Internet :: WWW/HTTP :: Dynamic Content
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Requires-Dist: Flask
+
+Flask-CacheControl
+------------------
+
+A light-weight library to conveniently set Cache-Control
+headers on the response. Decorate view functions with
+cache_for, cache, or dont_cache decorators. Makes use of
+Flask response.cache_control.
+
+This extension does not provide any caching of its own. Its sole
+purpose is to set Cache-Control and related HTTP headers on the
+response, so that clients, intermediary proxies or reverse proxies
+in your jurisdiction which evaluate Cache-Control headers, such as
+Varnish Cache, do the caching for you.
+
+

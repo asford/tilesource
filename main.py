@@ -7,6 +7,10 @@ app = maybe_debug_app(Flask(__name__))
 
 from flask import abort, redirect, url_for, render_template, Response, request
 
+from flask.ext.cachecontrol import ( FlaskCacheControl, cache )
+flask_cache_control = FlaskCacheControl()
+flask_cache_control.init_app(app)
+
 import PIL.Image as Image
 
 from tilesource import clip_image_alpha, overlay_image, sources, parse_tilespec
@@ -81,6 +85,7 @@ def composite_tilejson(tilespec):
     )
 
 @app.route("/composite/<tilespec>/tile")
+@cache(max_age=3600*60, public=True)
 def composite_tile(tilespec):
     tile_params = {
         p : request.args.get(p)
