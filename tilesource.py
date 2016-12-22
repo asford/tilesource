@@ -3,26 +3,13 @@ from io import BytesIO
 import PIL.Image as Image
 import PIL.ImageChops as ImageChops
 
-import requests
-
 sources = {
     "fs" : "http://caltopo.com/resource/imagery/tiles/sf/{z}/{x}/{y}.png",
     "mb" : "http://caltopo.com/resource/imagery/mapbuilder/cs-60-40-c21BB6100-h22-a21-r22-t22d-m21-p21/{z}/{x}/{y}.png",
+    "mbo" : "http://caltopo.com/resource/imagery/mapbuilder/clear-0-0-h22t-r23-t23/{z}/{x}/{y}.png",
     "ct" : "http://caltopo.com/resource/imagery/tiles/c/{z}/{x}/{y}.png",
     "im" : "http://khm1.googleapis.com/kh?v=709&hl=en-US&&x={x}&y={y}&z={z}"
 }
-
-def source_images(z, x, y, keys=None):
-    if not keys:
-        keys = sources.keys()
-
-    tile_images = {}
-    for s, u in sources.items():
-        r = requests.get(u.format(z=z, x=x, y=y))
-        r.raise_for_status()
-        assert r.headers["Content-Type"].startswith("image/")
-        tile_images[s] = Image.open(BytesIO(r.content))
-    return tile_images
 
 def parse_tilespec(tilespec):
     res = []
