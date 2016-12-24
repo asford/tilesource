@@ -14,6 +14,7 @@ flask_cache_control.init_app(app)
 import PIL.Image as Image
 
 from tilesource import clip_image_alpha, overlay_image, sources, parse_tilespec
+import tilesource
 
 from google.appengine.api import urlfetch, urlfetch_errors
 
@@ -45,7 +46,13 @@ def retrieve(*urls):
 
 @cache_result(cache=MemcachedCache(default_timeout=0))
 def render_tile(tilespec, z, x, y):
+    app.logger.info("render_tile: %s", locals())
     layers = set(layer for layer, alpha in tilespec)
+
+    #God horrible hack
+    if "customslope" in layers:
+        app.logger.info("adding erbg fetch")
+        layers = layers.union({"ergb"}).difference({"customslope"})
 
     tile_data = dict(zip(
         layers,
@@ -54,6 +61,13 @@ def render_tile(tilespec, z, x, y):
     ))
 
     tile_images = { l : Image.open(io.BytesIO(d)) for l, d in tile_data.items() }
+
+    if "ergb" in layers:
+        app.logger.info("rendering customslope")
+        elevation = tilesource.ergb_to_elevation( tile_images["ergb"] )
+        slope = tilesource.tile_slope_angle(elevation, x=x, y=y, z=z)
+        
+        tile_images["customslope"] = Image.fromarray(tilesource.angle_to_rbga(slope))
 
     composite = overlay_image(*[
         clip_image_alpha(tile_images[layer], alpha)
@@ -67,7 +81,7 @@ def render_tile(tilespec, z, x, y):
 @app.route("/")
 @app.route("/composite/")
 def composite_redirect():
-    return redirect(url_for("composite", tilespec="im_fs-32_ct-64"))
+    return redirect(url_for("composite", tilespec="topo_customslope-64"))
 
 @app.route("/composite/<tilespec>/")
 def composite(tilespec):
@@ -85,10 +99,10 @@ def composite_tilejson(tilespec):
     )
 
 @app.route("/composite/<tilespec>/tile")
-@cache(max_age=3600*60, public=True)
+@cache(max_age=60*60, public=True)
 def composite_tile(tilespec):
     tile_params = {
-        p : request.args.get(p)
+        p : int(request.args.get(p))
         for p in ("z", "x", "y")
     }
 

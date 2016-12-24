@@ -1,3 +1,4 @@
 decorator
 Flask
 Flask-CacheControl
+mercantile
