@@ -23,6 +23,8 @@ def maybe_debug_app(app):
 
         app.debug = True
         app.wsgi_app = DebuggedApplication(app.wsgi_app, evalex=True)
+    else:
+        app.debug = False
 
     return app
 

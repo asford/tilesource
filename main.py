@@ -1,6 +1,7 @@
 import os
 import io
 
+
 from flask import Flask
 from utility import maybe_debug_app
 app = maybe_debug_app(Flask(__name__))
@@ -10,6 +11,8 @@ from flask import abort, redirect, url_for, render_template, Response, request
 from flask_cachecontrol import FlaskCacheControl, cache
 flask_cache_control = FlaskCacheControl()
 flask_cache_control.init_app(app)
+
+import numpy
 
 import PIL.Image as Image
 
@@ -44,33 +47,53 @@ def retrieve(*urls):
 
     return [results[u] for u in urls]
 
+def retrieve_urls(urls):
+    return dict(zip(urls, retrieve(*urls)))
+
 @cache_result(cache=MemcachedCache(default_timeout=0))
 def render_tile(tilespec, z, x, y):
     app.logger.info("render_tile: %s", locals())
-    layers = set(layer for layer, alpha in tilespec)
+    layer_sources = {
+        l : tilesource.layer_source(l).format(z=z, x=x, y=y)
+        for l, a in tilespec 
+    }
 
-    #God horrible hack
-    if "customslope" in layers:
-        app.logger.info("adding erbg fetch")
-        layers = layers.union({"ergb"}).difference({"customslope"})
-
-    tile_data = dict(zip(
-        layers,
-        retrieve(*
-            [sources[layer].format(z=z, x=x, y=y) for layer in layers])
-    ))
-
+    tile_data = retrieve_urls(set(layer_sources.values()))
     tile_images = { l : Image.open(io.BytesIO(d)) for l, d in tile_data.items() }
 
-    if "ergb" in layers:
+    layer_images = {}
+
+    for l in layer_sources:
+        if not l.startswith("customslope"):
+            layer_images[l] = tile_images[layer_sources[l]]
+            continue
+
         app.logger.info("rendering customslope")
-        elevation = tilesource.ergb_to_elevation( tile_images["ergb"] )
-        slope = tilesource.tile_slope_angle(elevation, x=x, y=y, z=z)
-        
-        tile_images["customslope"] = Image.fromarray(tilesource.angle_to_rbga(slope))
+        elevation = tilesource.ergb_to_elevation( tile_images[layer_sources[l]] )
+
+        ds_factor = l.lstrip("customslope")
+        if not ds_factor:
+            xr, yr = tilesource.tile_pixel_resolution(x=x, y=y, z=z)
+
+            slope = tilesource.slope_angle(elevation, xr=xr, yr=yr)
+            
+        else:
+            f = int(ds_factor)
+            assert f >= 2
+            dse = elevation[f/2::f, f/2::f]
+            dxr, dyr = tilesource.tile_pixel_resolution(x=x, y=y, z=z) * f
+            dslope = tilesource.slope_angle(dse, xr=dxr, yr=dyr)
+            slope = (
+                numpy.repeat(axis=0, repeats=f, a=
+                numpy.repeat(axis=1, repeats=f, a=
+                    dslope)))
+
+
+        layer_images[l] = Image.fromarray(tilesource.angle_to_rbga(slope))
+
 
     composite = overlay_image(*[
-        clip_image_alpha(tile_images[layer], alpha)
+        clip_image_alpha(layer_images[layer], alpha)
         for layer, alpha in tilespec
     ])
 
@@ -99,7 +122,7 @@ def composite_tilejson(tilespec):
     )
 
 @app.route("/composite/<tilespec>/tile")
-@cache(max_age=60*60, public=True)
+@cache(max_age=60*60 if not app.debug else 0, public=True)
 def composite_tile(tilespec):
     tile_params = {
         p : int(request.args.get(p))

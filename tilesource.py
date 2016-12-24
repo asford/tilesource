@@ -17,8 +17,20 @@ sources = {
     "mbo" : "http://caltopo.com/resource/imagery/mapbuilder/clear-0-0-h22t-r23-t23/{z}/{x}/{y}.png",
     "ct" : "http://caltopo.com/resource/imagery/tiles/c/{z}/{x}/{y}.png",
     "im" : "http://khm1.googleapis.com/kh?v=709&hl=en-US&&x={x}&y={y}&z={z}",
-    "ergb" : "https://api.mapbox.com/v4/mapbox.terrain-rgb/{z}/{x}/{y}.pngraw?access_token=%s" % mapbox_api_token
-}
+    "ergb" : "https://api.mapbox.com/v4/mapbox.terrain-rgb/{z}/{x}/{y}.pngraw?access_token=%s" % mapbox_api_token,
+    "mbct" : "https://api.mapbox.com/styles/v1/asford/cix2rmi46003s2poh02m5cipm/tiles/256/{z}/{x}/{y}?access_token=%s" % mapbox_api_token
+    }
+
+def is_valid_layer(layer):
+    return layer in sources or layer.startswith("customslope")
+
+def layer_source(layer):
+    if layer in sources:
+        return sources[layer]
+    elif layer.startswith("customslope"):
+        return sources["ergb"]
+    else:
+        return None
 
 def parse_tilespec(tilespec):
     res = []
@@ -31,7 +43,7 @@ def parse_tilespec(tilespec):
             assert len(lspec) == 2
             layer, alpha = lspec[0], int(lspec[1])
         
-        assert layer in set(sources).union({"customslope"})
+        assert is_valid_layer(layer)
         assert alpha >=0 and alpha<=256
             
         res.append((layer, alpha))
@@ -90,8 +102,7 @@ def edgepad(a):
 
     return result
 
-def tile_slope_angle(elevation, x, y, z):
-    xr, yr = tile_pixel_resolution(x=x, y=y, z=z)
+def slope_angle(elevation, xr, yr):
 
     nbr_run = numpy.zeros((3, 3))
     nbr_run[1, [0, 2]] = xr
