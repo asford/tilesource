@@ -2,3 +2,4 @@ decorator
 Flask
 Flask-CacheControl
 mercantile
+traitlets

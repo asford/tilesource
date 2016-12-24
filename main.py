@@ -50,67 +50,17 @@ def retrieve(*urls):
 def retrieve_urls(urls):
     return dict(zip(urls, retrieve(*urls)))
 
-@cache_result(cache=MemcachedCache(default_timeout=0))
-def render_tile(tilespec, z, x, y):
-    app.logger.info("render_tile: %s", locals())
-    layer_sources = {
-        l : tilesource.layer_source(l).format(z=z, x=x, y=y)
-        for l, a in tilespec 
-    }
-
-    tile_data = retrieve_urls(set(layer_sources.values()))
-    tile_images = { l : Image.open(io.BytesIO(d)) for l, d in tile_data.items() }
-
-    layer_images = {}
-
-    for l in layer_sources:
-        if not l.startswith("customslope"):
-            layer_images[l] = tile_images[layer_sources[l]]
-            continue
-
-        app.logger.info("rendering customslope")
-        elevation = tilesource.ergb_to_elevation( tile_images[layer_sources[l]] )
-
-        ds_factor = l.lstrip("customslope")
-        if not ds_factor:
-            xr, yr = tilesource.tile_pixel_resolution(x=x, y=y, z=z)
-
-            slope = tilesource.slope_angle(elevation, xr=xr, yr=yr)
-            
-        else:
-            f = int(ds_factor)
-            assert f >= 2
-            dse = elevation[f/2::f, f/2::f]
-            dxr, dyr = tilesource.tile_pixel_resolution(x=x, y=y, z=z) * f
-            dslope = tilesource.slope_angle(dse, xr=dxr, yr=dyr)
-            slope = (
-                numpy.repeat(axis=0, repeats=f, a=
-                numpy.repeat(axis=1, repeats=f, a=
-                    dslope)))
-
-
-        layer_images[l] = Image.fromarray(tilesource.angle_to_rbga(slope))
-
-
-    composite = overlay_image(*[
-        clip_image_alpha(layer_images[layer], alpha)
-        for layer, alpha in tilespec
-    ])
-
-    b = io.BytesIO()
-    composite.save(b, format='png')
-    return b.getvalue()
-
 @app.route("/")
 @app.route("/composite/")
 def composite_redirect():
-    return redirect(url_for("composite", tilespec="topo_customslope-64"))
+    return redirect(url_for("composite", tilespec="topo~slope_a_64"))
 
 @app.route("/composite/<tilespec>/")
 def composite(tilespec):
     # Parse to assert that tilespec valid
     parse_tilespec(tilespec)
-    return render_template('composite/index.html', tilespec=tilespec)
+
+    return render_template('composite/index.html', tilespec=tilespec, view=request.args.get("view"))
 
 @app.route("/composite/<tilespec>/tilejson")
 def composite_tilejson(tilespec):
@@ -124,16 +74,27 @@ def composite_tilejson(tilespec):
 @app.route("/composite/<tilespec>/tile")
 @cache(max_age=60*60 if not app.debug else 0, public=True)
 def composite_tile(tilespec):
-    tile_params = {
+    tile = {
         p : int(request.args.get(p))
         for p in ("z", "x", "y")
     }
 
-    tilespec = parse_tilespec(tilespec)
+    tilelayers = parse_tilespec(tilespec)
+    app.logger.info(
+        "tilelayers: %r", [
+            (l.__class__.__name__, { t : getattr(l, t) for t in l.trait_names() })
+            for l in tilelayers
+        ])
 
-    tile = render_tile(tilespec=tilespec, **tile_params)
+    tile_data = retrieve_urls(
+        reduce(set.union, [set(l.resources_for(tile)) for l in tilelayers]))
+    
+    composite = overlay_image(*[l.render(tile, tile_data) for l in tilelayers])
 
-    return Response(tile, content_type='image/png')
+    b = io.BytesIO()
+    composite.save(b, format="png")
+
+    return Response(b.getvalue(), content_type='image/png')
 
 @app.errorhandler(urlfetch_errors.DeadlineExceededError)
 def deadline_exceeded_handler(ex):

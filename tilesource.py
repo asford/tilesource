@@ -1,4 +1,4 @@
-from io import BytesIO
+import io
 
 import numpy
 import mercantile
@@ -9,44 +9,121 @@ import PIL.ImageChops as ImageChops
 
 mapbox_api_token = "pk.eyJ1IjoiYXNmb3JkIiwiYSI6ImNpeDJiMWZpMjAwZ3kyb2xkdW1xa2MxYjQifQ.zbKaLisJVw917FJmO3T1fw"
 
+import traitlets
 
-sources = {
-    "topo" : "http://caltopo.s3.amazonaws.com/topo/{z}/{x}/{y}.png",
-    "fs" : "http://caltopo.com/resource/imagery/tiles/sf/{z}/{x}/{y}.png",
-    "mb" : "http://caltopo.com/resource/imagery/mapbuilder/cs-60-40-c21BB6100-h22-a21-r22-t22d-m21-p21/{z}/{x}/{y}.png",
-    "mbo" : "http://caltopo.com/resource/imagery/mapbuilder/clear-0-0-h22t-r23-t23/{z}/{x}/{y}.png",
-    "ct" : "http://caltopo.com/resource/imagery/tiles/c/{z}/{x}/{y}.png",
-    "im" : "http://khm1.googleapis.com/kh?v=709&hl=en-US&&x={x}&y={y}&z={z}",
-    "ergb" : "https://api.mapbox.com/v4/mapbox.terrain-rgb/{z}/{x}/{y}.pngraw?access_token=%s" % mapbox_api_token,
-    "mbct" : "https://api.mapbox.com/styles/v1/asford/cix2rmi46003s2poh02m5cipm/tiles/256/{z}/{x}/{y}?access_token=%s" % mapbox_api_token
-    }
+class HasTraits(traitlets.HasTraits):
+    #Override TypeError-swallowing in traitlets 4.2...
+    def __init__(self, *args, **kwargs):
+        # Allow trait values to be set using keyword arguments.
+        # We need to use setattr for this to trigger validation and
+        # notifications.
+        super_args = args
+        super_kwargs = {}
+        with self.hold_trait_notifications():
+            for key, value in kwargs.items():
+                if self.has_trait(key):
+                    setattr(self, key, value)
+                else:
+                    # passthrough args that don't set traits to super
+                    super_kwargs[key] = value
 
-def is_valid_layer(layer):
-    return layer in sources or layer.startswith("customslope")
+        super(traitlets.HasTraits, self).__init__(*super_args, **super_kwargs)
 
-def layer_source(layer):
-    if layer in sources:
-        return sources[layer]
-    elif layer.startswith("customslope"):
-        return sources["ergb"]
-    else:
-        return None
+class DirectTileFactory(object):
+    def __init__(self, name, urltemplate):
+        self.name = name
+        self.urltemplate = urltemplate
+
+    def create(self, **params):
+        return DirectTile( urltemplate = self.urltemplate, **params )
+    
+class DirectTile(HasTraits):
+    urltemplate = traitlets.Bytes()
+    a = traitlets.CInt(min=0, max=255, default_value=None, allow_none=True)
+
+    def target_url(self, tile):
+        return self.urltemplate.format(**tile)
+
+    def resources_for(self, tile):
+        return [self.urltemplate.format(**tile)]
+
+    def render(self, tile, resources):
+        i = Image.open(io.BytesIO(resources[self.target_url(tile)])).convert("RGBA")
+
+        if self.a:
+            i = clip_image_alpha(i, self.a)
+        return i
+
+class SlopeShadingFactory(object):
+    name = "slope"
+
+    def create(self, **params):
+        return SlopeShadingTile(**params)
+
+class SlopeShadingTile(HasTraits):
+    urltemplate = "https://api.mapbox.com/v4/mapbox.terrain-rgb/{z}/{x}/{y}.pngraw?access_token=%s" % mapbox_api_token
+    a = traitlets.CInt(min=0, max=255, default_value=None, allow_none = True)
+    resample = traitlets.CInt(min=2, default_value = None, allow_none=True)
+
+    def target_url(self, tile):
+        return self.urltemplate.format(**tile)
+
+    def resources_for(self, tile):
+        return [self.urltemplate.format(**tile)]
+
+    def render(self, tile, resources):
+        elevation = ergb_to_elevation(Image.open(io.BytesIO(
+            resources[self.target_url(tile)])))
+
+        if self.resample:
+            f = self.resample
+            dse = elevation[f/2::f, f/2::f]
+            dxr, dyr = tile_pixel_resolution(**tile) * f
+            dslope = slope_angle(dse, xr=dxr, yr=dyr)
+            slope = (
+                numpy.repeat(axis=0, repeats=f, a=
+                numpy.repeat(axis=1, repeats=f, a=
+                    dslope)))
+        else:
+            xr, yr = tile_pixel_resolution(**tile)
+            slope = slope_angle(elevation, xr=xr, yr=yr)
+
+        i = Image.fromarray(angle_to_rbga(slope))
+
+        if self.a:
+            i = clip_image_alpha(i, self.a)
+        return i
+
+sources = [
+    DirectTileFactory("topo", "http://caltopo.s3.amazonaws.com/topo/{z}/{x}/{y}.png"),
+    DirectTileFactory("fs", "http://caltopo.com/resource/imagery/tiles/sf/{z}/{x}/{y}.png"),
+    DirectTileFactory("mb", "http://caltopo.com/resource/imagery/mapbuilder/cs-60-40-c21BB6100-h22-a21-r22-t22d-m21-p21/{z}/{x}/{y}.png"),
+    DirectTileFactory("mbo", "http://caltopo.com/resource/imagery/mapbuilder/clear-0-0-h22t-r23-t23/{z}/{x}/{y}.png"),
+    DirectTileFactory("ct", "http://caltopo.com/resource/imagery/tiles/c/{z}/{x}/{y}.png"),
+    DirectTileFactory("im", "http://khm1.googleapis.com/kh?v=709&hl=en-US&&x={x}&y={y}&z={z}"),
+    DirectTileFactory("ergb", "https://api.mapbox.com/v4/mapbox.terrain-rgb/{z}/{x}/{y}.pngraw?access_token=%s" % mapbox_api_token),
+    DirectTileFactory("mbct", "https://api.mapbox.com/styles/v1/asford/cix2rmi46003s2poh02m5cipm/tiles/256/{z}/{x}/{y}?access_token=%s" % mapbox_api_token),
+    SlopeShadingFactory(),
+]
+
+_sources_by_name = { s.name : s for s in sources }
 
 def parse_tilespec(tilespec):
     res = []
     layers = tilespec.split()
-    for lspec in tilespec.split("_"):
-        lspec = lspec.split("-")
-        if len(lspec) == 1:
-            layer, alpha = lspec[0], 256
-        else:
-            assert len(lspec) == 2
-            layer, alpha = lspec[0], int(lspec[1])
-        
-        assert is_valid_layer(layer)
-        assert alpha >=0 and alpha<=256
-            
-        res.append((layer, alpha))
+    for slargs in tilespec.split("~"):
+        largs = slargs.split("_")
+        if not largs[0] in _sources_by_name:
+            raise ValueError("Invalid layer args: %r" % slargs)
+        if not len(largs) % 2 == 1:
+            raise ValueError("Invalid layer args: %r" % slargs)
+
+        params = {}
+        for i in range(1, len(largs), 2):
+            params[largs[i]] = largs[i+1]
+
+        res.append(_sources_by_name[largs[0]].create( **params ))
+
     return res
 
 def clip_image_alpha(image, max_alpha):
@@ -115,7 +192,7 @@ def slope_angle(elevation, xr, yr):
     )
 
     maximum_slope = numpy.nanmax( axis=-1,
-        a=numpy.abs( nbr_rise / nbr_run ).reshape(elevation.shape + (-1,)))
+        a=( nbr_rise / nbr_run ).reshape(elevation.shape + (-1,)))
 
     return numpy.rad2deg(numpy.arctan( maximum_slope ))
 

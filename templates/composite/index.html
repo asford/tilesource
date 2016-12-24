@@ -28,13 +28,13 @@
   var chair = [47.46439, -121.45903];
   var canada = [51.2143, -117.4697];
 
-	var mymap = L.map('map').setView(chair, 16);
+  var mymap = L.map('map').setView({{view or "chair"}}, 16);
 
   L.tileLayer('/composite/{{ tilespec }}/tile?z={z}&x={x}&y={y}', {
     attribution: 'Map data &copy; <a href="http://caltopo.com">Caltopo</a> | <a href="/composite/{{ tilespec }}/tilejson" download="tilesource({{ tilespec }}).json">tilejson</a> | /composite/{{ tilespec }}/tile?z={z}&x={x}&y={y}',
     
-		minZoom: 14,
-		maxZoom: 18,
+		minZoom: 7,
+		maxZoom: 17,
 	}).addTo(mymap);
 </script>
 
