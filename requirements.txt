@@ -3,3 +3,6 @@ Flask
 Flask-CacheControl
 mercantile
 traitlets
+requests
+requests_toolbelt
+GoogleAppEngineCloudStorageClient=>1.9.22

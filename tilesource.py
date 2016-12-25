@@ -10,31 +10,23 @@ mercantile.math = numpy
 numpy.atan = numpy.arctan
 from rolling_window import rolling_window
 
+import requests
+
 import PIL.Image as Image
 import PIL.ImageDraw as ImageDraw
 import PIL.ImageChops as ImageChops
 
+from google.appengine.ext import ndb
+
 mapbox_api_token = "pk.eyJ1IjoiYXNmb3JkIiwiYSI6ImNpeDJiMWZpMjAwZ3kyb2xkdW1xa2MxYjQifQ.zbKaLisJVw917FJmO3T1fw"
 
 import traitlets
-
-class HasTraits(traitlets.HasTraits):
-    #Override TypeError-swallowing in traitlets 4.2...
-    def __init__(self, *args, **kwargs):
-        # Allow trait values to be set using keyword arguments.
-        # We need to use setattr for this to trigger validation and
-        # notifications.
-        super_args = args
-        super_kwargs = {}
-        with self.hold_trait_notifications():
-            for key, value in kwargs.items():
-                if self.has_trait(key):
-                    setattr(self, key, value)
-                else:
-                    # passthrough args that don't set traits to super
-                    super_kwargs[key] = value
-
-        super(traitlets.HasTraits, self).__init__(*super_args, **super_kwargs)
+class StrictHasTraits(traitlets.HasTraits):
+    def __init__(self, **kwargs):
+        for k in kwargs:
+            if not self.has_trait(k):
+                raise TypeError("StrictHasTraits.__init__ got an unexpected argument %r" % k)
+        super(StrictHasTraits, self).__init__(**kwargs)
 
 class Direct(object):
     def __init__(self, name, urltemplate):
@@ -42,136 +34,36 @@ class Direct(object):
         self.urltemplate = urltemplate
 
     def create(self, **params):
-        return DirectTile( urltemplate = self.urltemplate, **params )
+        return DirectTile( name = self.name, urltemplate = self.urltemplate, **params )
     
-class DirectTile(HasTraits):
+class DirectTile(StrictHasTraits, object):
+    name = traitlets.Bytes()
     urltemplate = traitlets.Bytes()
-    a = traitlets.CInt(min=0, max=255, default_value=None, allow_none=True)
+    opacity = traitlets.CFloat(max=1.0, min=0.0, default_value=1.0)
 
-    def target_url(self, tile):
-        return self.urltemplate.format(**tile)
+    @property
+    def storage_key(self):
+        return self.name
 
-    def resources_for(self, tile):
-        return [self.urltemplate.format(**tile)]
+    @ndb.tasklet
+    def render_async(self, tile):
+        tile_url = self.urltemplate.format(**tile)
+        context = ndb.get_context()
+        result = yield context.urlfetch(tile_url)
+        if result.status_code != 200:
+            logging.error("error fetching: %r result: %s", tile_url, result)
+            raise ValueError("error fetching: %r result: %s" % (tile_url, result) )
 
-    def render(self, tile, resources):
-        i = Image.open(io.BytesIO(resources[self.target_url(tile)])).convert("RGBA")
+        raise ndb.Return(Image.open(io.BytesIO(result.content)).convert("RGBA"))
 
-        if self.a:
-            i = clip_image_alpha(i, self.a)
-        return i
+    def render(self, tile):
+        tile_url = self.urltemplate.format(**tile)
+        result = requests.get(tile_url)
+        if result.status_code != 200:
+            logging.error("error fetching: %r result: %s", tile_url, result)
+            raise ValueError("error fetching: %r result: %s" % (tile_url, result) )
 
-class SlopeShading(object):
-    name = "slope"
-
-    def create(self, **params):
-        return SlopeShadingTile(**params)
-
-class SlopeShadingTile(HasTraits):
-    urltemplate = "https://api.mapbox.com/v4/mapbox.terrain-rgb/{z}/{x}/{y}.pngraw?access_token=%s" % mapbox_api_token
-    a = traitlets.CInt(min=0, max=255, default_value=None, allow_none = True)
-    resample = traitlets.CInt(min=2, default_value = None, allow_none=True)
-
-    def target_url(self, tile):
-        return self.urltemplate.format(**tile)
-
-    def resources_for(self, tile):
-        return [self.urltemplate.format(**tile)]
-
-    def render(self, tile, resources):
-        elevation = ergb_to_elevation(Image.open(io.BytesIO(
-            resources[self.target_url(tile)])))
-
-        if self.resample:
-            f = self.resample
-            dse = rolling_window(elevation, (f/2, f/2), asteps=(f,f)).mean(axis=-1).mean(axis=-1)
-            logging.info("dse: %s", list(dse.shape))
-            dxr, dyr = tile_pixel_resolution(**tile) * f
-            logging.info("res: %0.2f, %0.2f", dxr, dyr)
-            dslope = slope_angle(dse, xr=dxr, yr=dyr)
-            slope = (
-                numpy.repeat(axis=0, repeats=f, a=
-                numpy.repeat(axis=1, repeats=f, a=
-                    dslope)))
-        else:
-            xr, yr = tile_pixel_resolution(**tile)
-            slope = slope_angle(elevation, xr=xr, yr=yr)
-
-        i = Image.fromarray(angle_to_rbga(slope))
-
-        if self.a:
-            i = clip_image_alpha(i, self.a)
-        return i
-
-class ElevationRaster(object):
-    name = "eraster"
-
-    def create(self, **params):
-        return ElevationRasterTile(**params)
-
-class ElevationRasterTile(HasTraits):
-    urltemplate = "https://api.mapbox.com/v4/mapbox.terrain-rgb/{z}/{x}/{y}.pngraw?access_token=%s" % mapbox_api_token
-    a = traitlets.CInt(min=0, max=255, default_value=None, allow_none = True)
-
-    def target_url(self, tile):
-        return self.urltemplate.format(**tile)
-
-    def resources_for(self, tile):
-        return [self.urltemplate.format(**tile)]
-
-    def render(self, tile, resources):
-        elevation = ergb_to_elevation(Image.open(io.BytesIO(
-            resources[self.target_url(tile)])))
-
-        elevation -= elevation.min()
-
-        i = Image.fromarray((elevation / elevation.max() * 255).astype("uint8")).convert("RGBA")
-
-        if self.a:
-            i = clip_image_alpha(i, self.a)
-        return i
-
-class ElevationArtifact(object):
-    name = "eart"
-
-    def create(self, **params):
-        return ElevationArtifactTile(**params)
-
-class ElevationArtifactTile(HasTraits):
-    urltemplate = "https://api.mapbox.com/v4/mapbox.terrain-rgb/{z}/{x}/{y}.pngraw?access_token=%s" % mapbox_api_token
-    a = traitlets.CInt(min=0, max=255, default_value=None, allow_none = True)
-    window = traitlets.CInt(min=2, max=255, default_value=2)
-
-    def target_url(self, tile):
-        return self.urltemplate.format(**tile)
-
-    def resources_for(self, tile):
-        return [self.urltemplate.format(**tile)]
-
-    def render(self, tile, resources):
-        elevation = ergb_to_elevation(Image.open(io.BytesIO(
-            resources[self.target_url(tile)])))
-
-        # issame = isclose(elevation[:-1, :-1], elevation[1:, 1:])
-        # res = numpy.zeros(elevation.shape, dtype="uint8")
-        # rolling_window(res, (2, 2))[numpy.nonzero(issame)] = 255
-
-        windows = rolling_window(elevation, window=(self.window, self.window))
-        windows = windows.reshape(windows.shape[:-2] + (-1,))
-
-        issame = numpy.all(isclose(windows[...,:1], windows), axis=-1)
-        logging.info("eart z: %s frac: %.02f", tile["z"], numpy.count_nonzero(issame) / float(issame.size))
-
-        res = numpy.zeros(elevation.shape + (4,), dtype="uint8")
-        res[...,3][numpy.nonzero(issame)] = 255
-        res[...,0] = 255
-        # rolling_window(res, (self.window, self.window))[numpy.nonzero(issame)] = 255
-
-        i = Image.fromarray(res).convert("RGBA")
-
-        if self.a:
-            i = clip_image_alpha(i, self.a)
-        return i
+        return Image.open(io.BytesIO(result.content)).convert("RGBA")
 
 import quantized_mesh_tile.global_geodetic
 
@@ -181,11 +73,19 @@ class QMTSlope(object):
     def create(self, **params):
         return QMTSlopeTile(**params)
 
-class QMTSlopeTile(HasTraits):
+class QMTSlopeTile(StrictHasTraits, object):
+    name = "qmtslope"
     urltemplate="https://assets.agi.com/stk-terrain/world/{z}/{x}/{y}.terrain?v=1.31376.0"
     geodetic = quantized_mesh_tile.global_geodetic.GlobalGeodetic(True)
+    opacity = traitlets.CFloat(max=1.0, min=0.0, default_value=1.0)
+    line = traitlets.CBool(default_value=False)
 
-    a = traitlets.CInt(min=0, max=255, default_value=None, allow_none = True)
+    @property
+    def storage_key(self):
+        key = self.name
+        if self.line:
+            key = key + "_line_True"
+        return key
 
     @classmethod
     def spanning_tile_coords(cls, xyzp):
@@ -237,20 +137,39 @@ class QMTSlopeTile(HasTraits):
         )
         
         return off_z_angle
-        
-    def resources_for(self, tile):
-        tile = mercantile.Tile(**tile)
-        return [
-            self.urltemplate.format(x=x,y=y,z=z)
-            for x, y, z in self.spanning_tile_coords(tile)
-        ]
 
-    def render(self, tile, data):
+    @ndb.tasklet
+    def render_async(self, tile):
         tile = mercantile.Tile(**tile)
-        qmts = [
-            self.load_qmt(x, y, z, data[self.urltemplate.format(x=x,y=y,z=z)])
+        context = ndb.get_context()
+
+        qmt_coords = self.spanning_tile_coords(tile)
+        qmt_tiles = yield tuple(
+            context.urlfetch(self.urltemplate.format(x=x, y=y, z=z))
+            for x, y, z in qmt_coords
+        )
+
+        qmt_data = {}
+        for c, t in zip(qmt_coords, qmt_tiles):
+            if t.status_code != 200:
+                logging.error("error fetching qmt: %r result: %s", c, result)
+                raise ValueError("error fetching qmt: %r result: %s" % (c, result) )
+            qmt_data[c] = t.content
+
+        raise ndb.Return(self._render_from_qmt(tile, qmt_data))
+
+    def render(self, tile):
+        tile = mercantile.Tile(**tile)
+
+        qmts = {
+            (x, y, z) : requests.get(self.urltemplate.format(x=x,y=y,z=z)).content
             for x, y, z in self.spanning_tile_coords(tile)
-        ]
+        }
+
+        return self._render_from_qmt(tile, qmt_data)
+
+    def _render_from_qmt(self, tile, qmt_data):
+        qmts = [self.load_qmt(x, y, z, d) for (x, y, z), d in qmt_data.items()]
         
         qm_coords = []
         qm_triangles = []
@@ -280,29 +199,24 @@ class QMTSlopeTile(HasTraits):
         for ti in range(len(qm_triangles)):
             rdraw.polygon(
                 map(tuple, qm_pix[qm_triangles[ti]]),
-                fill=tuple(qm_colors[ti])
+                fill=tuple(qm_colors[ti]),
+                outline = (0, 0, 0, 255) if self.line else None
             )
 
         res = rbuff.crop((128, 128, 255+128, 255+128))
-
-        if self.a:
-            res = clip_image_alpha(res, self.a)
 
         return res
 
 sources = [
     Direct("topo", "http://caltopo.s3.amazonaws.com/topo/{z}/{x}/{y}.png"),
-    Direct("fs", "http://caltopo.com/resource/imagery/tiles/sf/{z}/{x}/{y}.png"),
-    Direct("mb", "http://caltopo.com/resource/imagery/mapbuilder/cs-60-40-c21BB6100-h22-a21-r22-t22d-m21-p21/{z}/{x}/{y}.png"),
-    Direct("mbo", "http://caltopo.com/resource/imagery/mapbuilder/clear-0-0-h22t-r23-t23/{z}/{x}/{y}.png"),
-    Direct("ct", "http://caltopo.com/resource/imagery/tiles/c/{z}/{x}/{y}.png"),
-    Direct("im", "http://khm1.googleapis.com/kh?v=709&hl=en-US&&x={x}&y={y}&z={z}"),
-    Direct("ergb", "https://api.mapbox.com/v4/mapbox.terrain-rgb/{z}/{x}/{y}.pngraw?access_token=%s" % mapbox_api_token),
-    Direct("mbct", "https://api.mapbox.com/styles/v1/asford/cix2rmi46003s2poh02m5cipm/tiles/256/{z}/{x}/{y}?access_token=%s" % mapbox_api_token),
-    SlopeShading(),
-    ElevationRaster(),
-    ElevationArtifact(),
-    QMTSlope(),
+    Direct("ctfs", "http://caltopo.com/resource/imagery/tiles/sf/{z}/{x}/{y}.png"),
+    Direct("ctmb", "http://caltopo.com/resource/imagery/mapbuilder/cs-60-40-c21BB6100-h22-a21-r22-t22d-m21-p21/{z}/{x}/{y}.png"),
+    Direct("ctmbo", "http://caltopo.com/resource/imagery/mapbuilder/clear-0-0-h22t-r23-t23/{z}/{x}/{y}.png"),
+    Direct("ctcnt", "http://caltopo.com/resource/imagery/tiles/c/{z}/{x}/{y}.png"),
+    Direct("gosat", "http://khm1.googleapis.com/kh?v=709&hl=en-US&&x={x}&y={y}&z={z}"),
+    Direct("mbergb", "https://api.mapbox.com/v4/mapbox.terrain-rgb/{z}/{x}/{y}.pngraw?access_token=%s" % mapbox_api_token),
+    Direct("mbcnt", "https://api.mapbox.com/styles/v1/asford/cix2rmi46003s2poh02m5cipm/tiles/256/{z}/{x}/{y}?access_token=%s" % mapbox_api_token),
+    QMTSlope()
 ]
 
 _sources_by_name = { s.name : s for s in sources }
@@ -328,7 +242,7 @@ def parse_tilespec(tilespec):
 def clip_image_alpha(image, max_alpha):
     image = image.convert("RGBA")
     red, green, blue, alpha = image.split()
-    alpha = ImageChops.darker(alpha, Image.new("L", alpha.size, max_alpha))
+    alpha = ImageChops.darker(alpha, Image.new("L", alpha.size, (max_alpha,)))
     image.putalpha(alpha)
     
     return image
