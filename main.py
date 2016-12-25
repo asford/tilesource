@@ -37,30 +37,6 @@ from google.appengine.api import urlfetch, urlfetch_errors
 bucket_name = os.environ.get('BUCKET_NAME', app_identity.get_default_gcs_bucket_name())
 logging.info("gcs bucket_name: %r", bucket_name)
 
-from utility import cache_many, cache_result
-from werkzeug.contrib.cache import MemcachedCache
-
-@app.route("/")
-@app.route("/composite/")
-def composite_redirect():
-    return redirect(url_for("composite", tilespec="topo~slope_a_64"))
-
-@app.route("/composite/<tilespec>/")
-def composite(tilespec):
-    # Parse to assert that tilespec valid
-    parse_tilespec(tilespec)
-
-    return render_template('composite/index.html', tilespec=tilespec, view=request.args.get("view"))
-
-@app.route("/composite/<tilespec>/tilejson")
-def composite_tilejson(tilespec):
-    parse_tilespec(tilespec)
-
-    return Response(
-        render_template("composite/tilejson.json", tilespec=tilespec),
-        content_type='application/json; charset=utf-8'
-    )
-
 @ndb.tasklet
 def upload_object_async(storage_api, path, data, content_type, gcs_headers=None):
     """
@@ -128,6 +104,27 @@ def get_tile(tile_layer, tile, return_pil = False ):
     else:
         logging.info("refing: %s" % tile_key)
         raise ndb.Return(images.Image(filename="/gs" + tile_key))
+
+@app.route("/")
+@app.route("/composite/")
+def composite_redirect():
+    return redirect(url_for("composite", tilespec="gosat~qmtslope_opacity_.25~mbcnt_opacity_.5"))
+
+@app.route("/composite/<tilespec>/")
+def composite(tilespec):
+    # Parse to assert that tilespec valid
+    parse_tilespec(tilespec)
+
+    return render_template('composite/index.html', tilespec=tilespec, view=request.args.get("view"))
+
+@app.route("/composite/<tilespec>/tilejson")
+def composite_tilejson(tilespec):
+    parse_tilespec(tilespec)
+
+    return Response(
+        render_template("composite/tilejson.json", tilespec=tilespec),
+        content_type='application/json; charset=utf-8'
+    )
 
 @app.route("/composite/<tilespec>/tile")
 @cache(max_age=60*60 if not app.debug else 0, public=True)
