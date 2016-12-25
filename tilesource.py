@@ -169,8 +169,10 @@ class QMTSlopeTile(StrictHasTraits, object):
         return self._render_from_qmt(tile, qmt_data)
 
     def _render_from_qmt(self, tile, qmt_data):
+        logging.info("loading qmt files: %s", qmt_data.keys())
         qmts = [self.load_qmt(x, y, z, d) for (x, y, z), d in qmt_data.items()]
         
+        logging.info("generating mesh arrays")
         qm_coords = []
         qm_triangles = []
         ind = 0
@@ -182,8 +184,10 @@ class QMTSlopeTile(StrictHasTraits, object):
         qm_coords = numpy.concatenate(qm_coords, axis=0)
         qm_triangles = numpy.concatenate(qm_triangles, axis=0).reshape((-1, 3))
 
+        logging.info("calculating slope angles: %i", len(qm_triangles))
         slope_angles = self.triangle_slope_angles(qm_coords, qm_triangles)
 
+        logging.info("coloring slope")
         mb = mercantile.bounds(tile)
         qm_xs = (qm_coords[...,0] - mb.west) / ((mb.east - mb.west) / 255)
         qm_ys = (qm_coords[...,1] - mb.north) / ((mb.south - mb.north) / 255)
@@ -193,6 +197,7 @@ class QMTSlopeTile(StrictHasTraits, object):
         qm_pix[...,0] = qm_xs + 128
         qm_pix[...,1] = qm_ys + 128
 
+        logging.info("rendering tile")
         rbuff = Image.new("RGBA", (256 * 2, 256 * 2))
         rdraw = ImageDraw.ImageDraw(rbuff)
 

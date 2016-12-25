@@ -136,7 +136,7 @@ def composite_tile(tilespec):
 
     tile_layers = parse_tilespec(tilespec)
 
-    app.logger.info(
+    logging.info(
         "tile_layers: %r", [
             (l.__class__.__name__, { t : getattr(l, t) for t in l.trait_names() })
             for l in tile_layers
@@ -148,6 +148,7 @@ def composite_tile(tilespec):
     ]
     tile_images = [ i.get_result() for i in tile_images ]
 
+    logging.info("compositing")
     if not app.debug:
         composite = images.composite([
                 (i, 0, 0, l.opacity, images.TOP_LEFT)
