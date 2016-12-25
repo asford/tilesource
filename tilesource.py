@@ -17,6 +17,7 @@ import PIL.ImageDraw as ImageDraw
 import PIL.ImageChops as ImageChops
 
 from google.appengine.ext import ndb
+from google.appengine.api import memcache
 
 mapbox_api_token = "pk.eyJ1IjoiYXNmb3JkIiwiYSI6ImNpeDJiMWZpMjAwZ3kyb2xkdW1xa2MxYjQifQ.zbKaLisJVw917FJmO3T1fw"
 
@@ -139,36 +140,57 @@ class QMTSlopeTile(StrictHasTraits, object):
         return off_z_angle
 
     @ndb.tasklet
+    def fetch_tile_data(self, x, y, z):
+        context = ndb.get_context()
+        tile_data = yield context.urlfetch(self.urltemplate.format(x=x, y=y, z=z))
+        if tile_data.status_code != 200:
+            logging.error("error fetching qmt: %r url: %s result: %s", (x,y,z), self.urltemplate.format(x=x, y=y, z=z), result)
+            raise ValueError("error fetching qmt: %r url: %s result: %s", (x,y,z), self.urltemplate.format(x=x, y=y, z=z), result)
+
+        logging.info("loading qmt file: %s", ((x,y,z),))
+        qmt = self.load_qmt(x, y, z, tile_data.content)
+
+        logging.info("generating mesh array: %s", ((x,y,z),))
+        raise ndb.Return({
+            "coords" : numpy.array(qmt.getVerticesCoordinates()),
+            "triangles" : numpy.array(numpy.array(qmt.indices))
+        })
+
+    @ndb.tasklet
     def render_async(self, tile):
         tile = mercantile.Tile(**tile)
-        context = ndb.get_context()
+        cache = memcache._CLIENT
+        targets = self.spanning_tile_coords(tile)
+        tkeys = {str(t) : t for t in targets}
 
-        qmt_coords = self.spanning_tile_coords(tile)
-        qmt_tiles = yield tuple(
-            context.urlfetch(self.urltemplate.format(x=x, y=y, z=z))
-            for x, y, z in qmt_coords
-        )
+        cached_coords = yield cache.get_multi_async(tkeys, key_prefix="%s+tilearray+" % self.name)
 
-        qmt_data = {}
-        for c, t in zip(qmt_coords, qmt_tiles):
-            if t.status_code != 200:
-                logging.error("error fetching qmt: %r result: %s", c, result)
-                raise ValueError("error fetching qmt: %r result: %s" % (c, result) )
-            qmt_data[c] = t.content
+        newkeys = set(tkeys) - set(cached_coords)
+        newdata = yield tuple(self.fetch_tile_data(*tkeys[c]) for c in newkeys)
+        new = dict(zip(newkeys, newdata))
+        yield cache.set_multi_async(new, key_prefix="%s+tilearray+" % self.name)
 
-        raise ndb.Return(self._render_from_qmt(tile, qmt_data))
+        qm_coords = []
+        qm_triangles = []
+        ind = 0
+        for qmt in list(cached_coords.values()) + list(new.values()):
+            qm_coords.append(qmt["coords"])
+            qm_triangles.append(qmt["triangles"]+ ind)
+            ind += len(qm_coords[-1])
+            
+        qm_coords = numpy.concatenate(qm_coords, axis=0)
+        qm_triangles = numpy.concatenate(qm_triangles, axis=0).reshape((-1, 3))
+
+        raise ndb.Return(self._render_from_qmt(tile, qm_coords, qm_triangles))
 
     def render(self, tile):
         tile = mercantile.Tile(**tile)
 
-        qmts = {
+        qmt_data = {
             (x, y, z) : requests.get(self.urltemplate.format(x=x,y=y,z=z)).content
             for x, y, z in self.spanning_tile_coords(tile)
         }
 
-        return self._render_from_qmt(tile, qmt_data)
-
-    def _render_from_qmt(self, tile, qmt_data):
         logging.info("loading qmt files: %s", qmt_data.keys())
         qmts = [self.load_qmt(x, y, z, d) for (x, y, z), d in qmt_data.items()]
         
@@ -184,6 +206,9 @@ class QMTSlopeTile(StrictHasTraits, object):
         qm_coords = numpy.concatenate(qm_coords, axis=0)
         qm_triangles = numpy.concatenate(qm_triangles, axis=0).reshape((-1, 3))
 
+        return self._render_from_qmt(tile, qm_coords, qm_triangles)
+
+    def _render_from_qmt(self, tile, qm_coords, qm_triangles):
         logging.info("calculating slope angles: %i", len(qm_triangles))
         slope_angles = self.triangle_slope_angles(qm_coords, qm_triangles)
 
