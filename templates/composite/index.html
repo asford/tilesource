@@ -9,6 +9,11 @@
 
 	<link rel="stylesheet" href="https://unpkg.com/leaflet@1.0.2/dist/leaflet.css" />
 	<script src="https://unpkg.com/leaflet@1.0.2/dist/leaflet.js"></script>
+	<script src="https://unpkg.com/leaflet-hash@0.2.1/leaflet-hash.js"></script>
+
+  <script src="https://unpkg.com/leaflet-bookmarks@0.2.5/dist/Leaflet.Bookmarks.min.js"></script>
+  <link type="text/css" rel="stylesheet" href="https://unpkg.com/leaflet-bookmarks@0.2.5/dist/leaflet.bookmarks.css">
+
   
 	<style>
 		#map {
@@ -28,14 +33,17 @@
   var chair = [47.46439, -121.45903];
   var canada = [51.2143, -117.4697];
 
-  var mymap = L.map('map').setView({{view or "chair"}}, 16);
+  var map = L.map('map').setView({{view or "chair"}}, 16);
+
+  var hash = new L.Hash(map);
+  var bcontrol = new L.Control.Bookmarks().addTo(map);
 
   L.tileLayer('/composite/{{ tilespec }}/tile?z={z}&x={x}&y={y}', {
     attribution: 'Map data &copy; <a href="http://caltopo.com">Caltopo</a> | <a href="/composite/{{ tilespec }}/tilejson" download="tilesource({{ tilespec }}).json">tilejson</a> | /composite/{{ tilespec }}/tile?z={z}&x={x}&y={y}',
     
-		minZoom: 7,
+		minZoom: 3,
 		maxZoom: 17,
-	}).addTo(mymap);
+	}).addTo(map);
 </script>
 
 

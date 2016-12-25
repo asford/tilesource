@@ -1,0 +1,16 @@
+setup.cfg
+quantized_mesh_tile/__init__.py
+quantized_mesh_tile/bbsphere.py
+quantized_mesh_tile/cartesian3d.py
+quantized_mesh_tile/global_geodetic.py
+quantized_mesh_tile/horizon_occlusion_point.py
+quantized_mesh_tile/llh_ecef.py
+quantized_mesh_tile/terrain.py
+quantized_mesh_tile/topology.py
+quantized_mesh_tile/utils.py
+quantized_mesh_tile.egg-info/PKG-INFO
+quantized_mesh_tile.egg-info/SOURCES.txt
+quantized_mesh_tile.egg-info/dependency_links.txt
+quantized_mesh_tile.egg-info/not-zip-safe
+quantized_mesh_tile.egg-info/requires.txt
+quantized_mesh_tile.egg-info/top_level.txt

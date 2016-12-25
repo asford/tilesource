@@ -1,0 +1,10 @@
+Metadata-Version: 1.0
+Name: quantized-mesh-tile
+Version: 0.3a0
+Summary: Quantized-Mesh format reader and writer
+Home-page: https://github.com/loicgasser/quantized-mesh-tile
+Author: Loic Gasser
+Author-email: loicgasser4@gmail.com
+License: MIT
+Description: UNKNOWN
+Platform: UNKNOWN
